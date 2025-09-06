@@ -1,0 +1,39 @@
+---
+- name: Gather CPU information
+  command: lscpu
+  register: cpu_info
+  changed_when: false
+
+- name: Check Hyper-Threading status
+  set_fact:
+    hyperthreading_enabled: "{{ 'Thread(s) per core: 2' in cpu_info.stdout or 'Thread(s) per core: 4' in cpu_info.stdout }}"
+
+- name: Check if CPU governor info is available
+  stat:
+    path: /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+  register: governor_file
+  changed_when: false
+
+- name: Read current CPU governor
+  command: cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+  register: cpu_governor
+  changed_when: false
+  failed_when: false
+  when: governor_file.stat.exists
+
+- name: Gather CPU flags
+  shell: "grep flags /proc/cpuinfo | head -1 | cut -d: -f2 | sed 's/^ *//'"
+  register: cpu_flags
+  changed_when: false
+
+- name: Final system status summary
+  debug:
+    msg: |
+      SERVER PREPARATION COMPLETE
+      ===========================
+      • CPU: Governor={{ cpu_governor.stdout | default('Absent') }}, Hyper-Threading={{ 'enabled' if hyperthreading_enabled else 'disabled' }}
+      • Architecture: {{ cpu_info.stdout_lines | select('match', '^Architecture') | list | first | default('Unknown') }}
+      • Model: {{ cpu_info.stdout_lines | select('match', '^Model name') | list | first | default('Unknown') | regex_replace('^Model name:\\s*','') }}
+      • CPU Flags: {{ cpu_flags.stdout | default('Unknown') }}
+      • Network interface: {{ target_interface_name | default('Unknown') }}
+      • Disk encryption: {{ encryption_method | default('Not configured') }}

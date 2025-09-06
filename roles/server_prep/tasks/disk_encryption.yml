@@ -1,0 +1,108 @@
+---
+- name: Ensure cryptsetup is installed
+  package:
+    name: cryptsetup
+    state: present
+
+- name: Validate encryption method
+  fail:
+    msg: "encryption_method must be either 'passphrase' or 'keyfile'"
+  when: encryption_method not in ['passphrase', 'keyfile']
+
+- name: Check if encryption disk exists
+  stat:
+    path: "{{ encryption_disk }}"
+  register: disk_partition
+
+- name: Fail if disk partition doesn't exist
+  fail:
+    msg: "Disk partition {{ encryption_disk }} does not exist!"
+  when: not disk_partition.stat.exists
+
+- name: Check if disk is already encrypted
+  command: cryptsetup isLuks {{ encryption_disk }}
+  register: luks_info
+  ignore_errors: true
+  changed_when: false
+
+- name: Check if disk is currently mounted (only if not encrypted)
+  command: findmnt -n -o TARGET {{ encryption_disk }}
+  register: disk_mounted
+  failed_when: disk_mounted.rc > 1
+  changed_when: false
+  when: luks_info.rc != 0
+
+- name: Fail if disk is mounted (only if not encrypted)
+  fail:
+    msg: "Disk {{ encryption_disk }} is currently mounted at {{ disk_mounted.stdout }}. Unmount it first."
+  when: 
+    - luks_info.rc != 0
+    - disk_mounted is defined
+    - disk_mounted.rc == 0
+
+- block:
+    - name: Create encryption keyfile
+      copy:
+        content: "{{ lookup('password', '/dev/null length=64 chars=ascii_letters,digits,punctuation') }}"
+        dest: "{{ encryption_keyfile }}"
+        mode: '0600'
+        owner: root
+        group: root
+      no_log: true
+
+    - name: Create encrypted partition with keyfile
+      community.crypto.luks_device:
+        device: "{{ encryption_disk }}"
+        state: present
+        keyfile: "{{ encryption_keyfile }}"
+        keyslot: 0
+      no_log: true
+
+  when: 
+    - luks_info.rc != 0
+    - encryption_method == 'keyfile'
+
+- block:
+    - name: Request encryption passphrase
+      pause:
+        prompt: "Enter passphrase for disk encryption {{ encryption_disk }}"
+        echo: no
+      register: encryption_passphrase
+
+    - name: Create encrypted partition with passphrase
+      community.crypto.luks_device:
+        device: "{{ encryption_disk }}"
+        state: present
+        passphrase: "{{ encryption_passphrase.user_input }}"
+        keyslot: 0
+      no_log: true
+
+  when: 
+    - luks_info.rc != 0
+    - encryption_method == 'passphrase'
+
+- name: Add backup authentication method
+  block:
+    - name: Add backup passphrase (if primary is keyfile)
+      community.crypto.luks_device:
+        device: "{{ encryption_disk }}"
+        state: present
+        passphrase: "{{ lookup('password', '/dev/null length=32') }}"
+        keyslot: 1
+      no_log: true
+      when: encryption_method == 'keyfile'
+
+    - name: Add backup keyfile (if primary is passphrase)
+      community.crypto.luks_device:
+        device: "{{ encryption_disk }}"
+        state: present
+        keyfile: "{{ encryption_keyfile }}"
+        keyslot: 1
+      no_log: true
+      when: encryption_method == 'passphrase'
+
+  when: luks_info.rc != 0
+
+- name: Display encryption method
+  debug:
+    msg: "Disk {{ encryption_disk }} is encrypted using {{ encryption_method }}"

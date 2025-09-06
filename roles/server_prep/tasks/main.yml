@@ -1,0 +1,16 @@
+---
+- name: Enable disk encryption (manual passphrase)
+  import_tasks: disk_encryption.yml
+  tags: disk 
+
+- name: Optimize CPU settings
+  import_tasks: cpu_optimization.yml
+  tags: cpu
+
+- name: Rename network interface
+  import_tasks: network_rename.yml
+  tags: network
+
+- name: Display system information
+  import_tasks: system_info.yml
+  tags: info

@@ -1,0 +1,8 @@
+---
+- name: Server Preparation and Optimization
+  hosts: servers
+  become: true
+  gather_facts: true
+
+  roles:
+    - server_prep

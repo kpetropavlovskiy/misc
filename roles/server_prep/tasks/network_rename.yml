@@ -1,0 +1,47 @@
+---
+- name: Get current active network interface
+  set_fact:
+    active_interface: "{{ ansible_default_ipv4.interface }}"
+
+- name: Display detected active interface
+  debug:
+    msg: "Detected active interface: {{ active_interface }}"
+
+- name: Check if renaming is needed
+  set_fact:
+    renaming_needed: "{{ active_interface != target_interface_name }}"
+
+- name: Create udev rule for persistent renaming (if needed)
+  copy:
+    dest: "/etc/udev/rules.d/10-rename-{{ active_interface }}.rules"
+    content: 'SUBSYSTEM=="net", ACTION=="add", ATTR{address}=="{{ ansible_default_ipv4.macaddress }}", NAME="{{ target_interface_name }}"'
+    owner: root
+    group: root
+    mode: '0644'
+  when: renaming_needed
+  notify: reboot for system changes
+
+- name: Update netplan configuration
+  block:
+    - name: Find netplan config files
+      find:
+        paths: /etc/netplan
+        patterns:
+          - "*.yaml"
+          - "*.yml"
+      register: netplan_files
+      when: renaming_needed
+
+    - name: Update interface name in netplan config
+      replace:
+        path: "{{ item.path }}"
+        regexp: "{{ active_interface }}"
+        replace: "{{ target_interface_name }}"
+      loop: "{{ netplan_files.files }}"
+      when: renaming_needed      
+
+- name: Display renaming information
+  debug:
+    msg: "Interface {{ active_interface }} will be renamed to {{ target_interface_name }} after reboot. Current active interface: {{ active_interface }}. Target interface name: {{ target_interface_name }}. Renaming needed: {{ renaming_needed }}"
+- name: Flush handlers immediately
+  meta: flush_handlers

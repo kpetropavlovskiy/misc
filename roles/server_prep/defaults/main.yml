@@ -1,0 +1,7 @@
+---
+# Default settings
+encryption_disk: /dev/xvdf
+encryption_method: keyfile #or passphrase
+encryption_keyfile: /root/luks.key
+target_interface_name: net0
+target_cstate: 1  
