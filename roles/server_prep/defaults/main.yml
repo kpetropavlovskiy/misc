@@ -3,5 +3,9 @@
 encryption_disk: /dev/xvdf
 encryption_method: keyfile #or passphrase
 encryption_keyfile: /root/luks.key
+encryption_name: securedata
+encryption_mount: /mnt/secure
+encryption_fstype: ext4 
+encryption_mount_options: defaults
 target_interface_name: net0
-target_cstate: 1  
+target_cstate: 1

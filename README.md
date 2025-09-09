@@ -2,7 +2,7 @@
 
 ## Description
 Ansible role for automated server preparation with:
-- Disk encryption (LUKS)
+- Full LUKS encryption of specified disk with automatic mounting setup (for keyfile method)
 - CPU optimization (disable C-states, performance governor)
 - Network interface renaming
 - Detailed output about CPU, disk encryption and network interface parameters
@@ -43,14 +43,23 @@ ansible-galaxy collection install community.crypto
 | `encryption_keyfile`     | `/root/luks.key`    | Path to encryption keyfile                                                   |
 | `target_interface_name`  | `net0`              | New network interface name                                                   |
 | `target_cstate`          | `1`                 | Maximum allowed CPU C-state (e.g., 1 disables deep C-states)                 | 
+|encryption_name           | `securedata`        | UKS device mapper name (/dev/mapper/securedata)                              |
+|encryption_mount          |`/mnt/secure`        | Mount point for encrypted volume                                             |
+|encryption_fstype         |`ext4`               | Filesystem type for encrypted volume                                         |
+|encryption_mount_options  |`defaults`           | Mount options for fstab                                                      |
 
-> **Note:** Variables can be set in `defaults/main.yaml` or passed via `-e`.
+
+> **Note:** Variables can be set in `defaults/main.yaml` or passed via `-e` flag.
 
 ---
 
 ## Encryption Modes
 - keyfile: Automated encryption using keyfile (recommended for servers)
+  - Disk is automatically decrypted and mounted during playbook execution
+  - Future reboots will also automatically decrypt and mount the disk
 - passphrase: Manual passphrase input required on each boot
+  - Disk cannot be automatically mounted at boot
+  - Requires manual decryption and mount
 
 ---
 ## Usage
@@ -73,6 +82,9 @@ ansible-playbook -i inventory playbook.yml
 ## Features
 
 ### Disk Encryption
+- Keyfile method: Full automation - disk is automatically decrypted and mounted at boot
+- Passphrase method: Manual operation - requires passphrase entry on each reboot
+- Filesystem management: Automatic ext4/xfs filesystem creation on first encryption
 - LUKS encryption with primary and backup authentication
 - Support for both keyfile and passphrase methods
 - Safety checks (disk exists, not mounted, not already encrypted)
@@ -110,6 +122,7 @@ A secondary LUKS key/passphrase is created, providing a recovery option in case 
 
 ---
 ## Idempotency
+- Crypttab and fstab entries are checked and updated only if missing
 - Tasks check the current system state and only make changes if necessary  
 - All tasks are designed to be fully idempotent using appropriate Ansible modules
 
@@ -117,6 +130,7 @@ A secondary LUKS key/passphrase is created, providing a recovery option in case 
 After execution, the playbook will display system information automatically, including:
 
 - Encryption status and method
+- Mount details (for keyfile only)
 - CPU governor and C-state settings
 - Network interface configuration
 - System architecture information
@@ -126,8 +140,15 @@ After execution, the playbook will display system information automatically, inc
 If you need to completely wipe and reinitialize the encrypted disk:
 
 ```bash
+#unmount disk
+sudo umount /mnt/secure/
+
 # Close LUKS mapping (if still open)
 sudo cryptsetup luksClose encrypted_data
+
+#remove entries from crypttab/fstab
+sudo sed -i '/securedata/d' /etc/crypttab
+sudo sed -i '/\/mnt\/secure/d' /etc/fstab
 
 # Overwrite disk with zeros (irreversible!)
 sudo dd if=/dev/zero of=/dev/xvdf bs=1M status=progress
@@ -137,7 +158,8 @@ sudo dd if=/dev/zero of=/dev/xvdf bs=1M status=progress
 ---
 ## Future Improvements
 - Extend support to RedHat-based systems (currently untested due to environment availability)
-- Encrypted disk automount
+- Support automount for passphrase-based LUKS (requires integration with secret management or prompt handling)
+
 
 ---
 ## Contributing

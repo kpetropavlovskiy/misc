@@ -36,4 +36,9 @@
       • Model: {{ cpu_info.stdout_lines | select('match', '^Model name') | list | first | default('Unknown') | regex_replace('^Model name:\\s*','') }}
       • CPU Flags: {{ cpu_flags.stdout | default('Unknown') }}
       • Network interface: {{ target_interface_name | default('Unknown') }}
-      • Disk encryption: {{ encryption_method | default('Not configured') }}
+      • Disk encryption:
+          - Method: {{ encryption_method | default('Not configured') }}
+          - Disk: {{ encryption_disk | default('N/A') }}
+          - Mapper: /dev/mapper/{{ encryption_name | default('N/A') }}
+          - Mount: {{ encryption_mount | default('N/A') }}
+          - Automount: {% if encryption_method == 'keyfile' %}configured via crypttab+fstab{% elif encryption_method == 'passphrase' %}manual at boot{% else %}not configured{% endif %}

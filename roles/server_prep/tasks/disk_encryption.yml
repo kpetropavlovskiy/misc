@@ -35,11 +35,14 @@
 - name: Fail if disk is mounted (only if not encrypted)
   fail:
     msg: "Disk {{ encryption_disk }} is currently mounted at {{ disk_mounted.stdout }}. Unmount it first."
-  when: 
+  when:
     - luks_info.rc != 0
     - disk_mounted is defined
     - disk_mounted.rc == 0
 
+# ============================
+# Keyfile: primary LUKS initialization
+# ============================
 - block:
     - name: Create encryption keyfile
       copy:
@@ -58,10 +61,13 @@
         keyslot: 0
       no_log: true
 
-  when: 
+  when:
     - luks_info.rc != 0
     - encryption_method == 'keyfile'
 
+# ============================
+# Passphrase: primary LUKS initialization
+# ============================
 - block:
     - name: Request encryption passphrase
       pause:
@@ -77,10 +83,13 @@
         keyslot: 0
       no_log: true
 
-  when: 
+  when:
     - luks_info.rc != 0
     - encryption_method == 'passphrase'
 
+# ============================
+# Reserve auth method
+# ============================
 - name: Add backup authentication method
   block:
     - name: Add backup passphrase (if primary is keyfile)
@@ -103,6 +112,84 @@
 
   when: luks_info.rc != 0
 
-- name: Display encryption method
+# ============================
+# Keyfile: FileSystem creation
+# ============================
+- block:
+    - name: Open LUKS device to (maybe) create filesystem
+      community.crypto.luks_device:
+        device: "{{ encryption_disk }}"
+        state: opened
+        name: "{{ encryption_name }}"
+        keyfile: "{{ encryption_keyfile }}"
+      no_log: true
+
+    - name: Check if filesystem exists on mapped device
+      command: blkid -o value -s TYPE /dev/mapper/{{ encryption_name }}
+      register: fs_check
+      failed_when: false
+      changed_when: false
+
+    - name: Create filesystem on the encrypted device if none
+      filesystem:
+        fstype: "{{ encryption_fstype }}"
+        dev: "/dev/mapper/{{ encryption_name }}"
+      when: fs_check.rc != 0
+
+    - name: Close LUKS device after filesystem init
+      community.crypto.luks_device:
+        name: "{{ encryption_name }}"
+        state: closed
+
+  when:
+    - luks_info.rc != 0
+    - encryption_method == 'keyfile'
+
+# ============================
+# Keyfile: automount
+# ============================
+- block:
+    - name: Ensure mount directory exists
+      file:
+        path: "{{ encryption_mount }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Ensure crypttab entry exists (auto-decrypt on boot)
+      community.general.crypttab:
+        name: "{{ encryption_name }}"
+        backing_device: "{{ encryption_disk }}"
+        password: "{{ encryption_keyfile }}"        
+        state: present
+
+    - name: Ensure LUKS mapping is opened for mounting now
+      community.crypto.luks_device:
+        device: "{{ encryption_disk }}"
+        state: opened
+        name: "{{ encryption_name }}"
+        keyfile: "{{ encryption_keyfile }}"
+      no_log: true
+
+    - name: Ensure mounted now and in fstab
+      ansible.posix.mount:
+        path: "{{ encryption_mount }}"
+        src: "/dev/mapper/{{ encryption_name }}"
+        fstype: "{{ encryption_fstype }}"
+        opts: "{{ encryption_mount_options }}"
+        state: mounted
+
+  when: encryption_method == 'keyfile'
+
+# ============================
+# Passphrase: notification
+# ============================
+- name: Notify user about automount limitation
   debug:
-    msg: "Disk {{ encryption_disk }} is encrypted using {{ encryption_method }}"
+    msg: |
+      Automount not configured: encryption_method=passphrase requires manual input at boot.
+      Manual example:
+      sudo cryptsetup open {{ encryption_disk }} {{ encryption_name }} \
+        && sudo mount /dev/mapper/{{ encryption_name }} {{ encryption_mount }}
+  when: encryption_method == 'passphrase'
